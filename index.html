@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FPL Assistant</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+    background: #f5f6f8;
+    color: #1a1a1a;
+  }
+  h1 { font-size: 24px; margin-bottom: 4px; }
+  .caption { color: #666; font-size: 14px; margin-bottom: 24px; }
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #333; }
+  input[type=text], input[type=number] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 15px;
+    margin-bottom: 12px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    background: #38003c;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { background: #4d0053; }
+  button:disabled { background: #999; cursor: not-allowed; }
+  .small-btn { width: auto; padding: 6px 12px; font-size: 13px; font-weight: 600; }
+  .metrics { display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+  .metric { flex: 1; min-width: 100px; background: #f0f1f4; border-radius: 8px; padding: 12px; text-align: center; }
+  .metric .label { font-size: 12px; color: #666; }
+  .metric .value { font-size: 18px; font-weight: 700; margin-top: 4px; }
+  .rating { font-size: 22px; font-weight: 700; margin: 8px 0; }
+  .alert { padding: 10px 12px; border-radius: 4px; margin-bottom: 8px; font-size: 14px; border-left: 4px solid; }
+  .alert-warn { background: #fff8e1; border-color: #f0ad4e; }
+  .alert-danger { background: #fdecea; border-color: #d9534f; }
+  .alert-info { background: #e8f0fe; border-color: #4285f4; }
+  .success { background: #e6f4ea; border-left: 4px solid #34a853; padding: 10px 12px; border-radius: 4px; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
+  th { color: #666; font-weight: 600; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+  .badge-c { background: #38003c; color: #fff; }
+  .badge-v { background: #ddd; color: #333; }
+  .badge-chip { background: #e8f0fe; color: #1a3d7c; margin-right: 6px; margin-bottom: 6px; padding: 4px 10px; }
+  .msg { padding: 12px; border-radius: 6px; font-size: 14px; }
+  .msg-error { background: #fdecea; color: #611a15; }
+  .msg-warn { background: #fff8e1; color: #664d03; }
+  .spinner { border: 3px solid #eee; border-top: 3px solid #38003c; border-radius: 50%; width: 22px; height: 22px; animation: spin 0.8s linear infinite; margin: 0 auto; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h3 { font-size: 15px; margin: 0 0 8px; }
+  .section-title { font-size: 15px; font-weight: 700; margin: 0 0 8px; display: flex; align-items: center; gap: 6px; }
+  .countdown { font-size: 28px; font-weight: 700; }
+  .result-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border: 1px solid #eee; border-radius: 6px; margin-bottom: 6px; cursor: pointer; font-size: 14px; }
+  .result-row:hover { background: #f5f6f8; }
+  .result-row .rname { color: #666; font-size: 12px; }
+  .hint { font-size: 12px; color: #888; margin: -6px 0 12px; }
+  .rec-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+  .rec-row:last-child { border-bottom: none; }
+</style>
+</head>
+<body>
+
+<h1>⚽ My FPL Assistant</h1>
+<div class="caption">Your personal squad advisor — open locally in Chrome</div>
+
+<div class="card">
+  <label for="teamId">FPL Team ID</label>
+  <input type="text" id="teamId" placeholder="e.g. 123456">
+  <div class="hint">Saved automatically for next time.</div>
+
+  <label for="leagueId">Mini-league ID (for rival comparison)</label>
+  <input type="text" id="leagueId" placeholder="e.g. 314">
+  <div class="hint">Find this in the URL when viewing your mini-league standings.</div>
+
+  <label for="nameSearch">Search a team by name (needs league ID above)</label>
+  <input type="text" id="nameSearch" placeholder="Start typing a name...">
+  <button class="small-btn" onclick="searchByName()">Search</button>
+  <div id="searchResults" style="margin-top:10px"></div>
+
+  <button id="loadBtn" onclick="loadDashboard()" style="margin-top:12px">Load my dashboard</button>
+</div>
+
+<div id="output"></div>
+
+<script>
+const API_BASE = "https://fantasy.premierleague.com/api";
+const PROXIES = [
+  url => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  url => "https://corsproxy.io/?url=" + encodeURIComponent(url),
+  url => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url)
+];
+const POS_NAMES = ["GK", "DEF", "MID", "FWD"];
+
+async function fetchJson(url) {
+  let lastErr;
+  for (const buildProxyUrl of PROXIES) {
+    try {
+      const res = await fetch(buildProxyUrl(url));
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      return data;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("All proxies failed");
+}
+
+function isValidId(v) {
+  return /^[0-9]+$/.test((v || "").trim()) && parseInt(v, 10) > 0;
+}
+
+// --- Persisted inputs ---
+const teamInput = document.getElementById("teamId");
+const leagueInput = document.getElementById("leagueId");
+teamInput.value = localStorage.getItem("fpl_team_id") || "1152818";
+leagueInput.value = localStorage.getItem("fpl_league_id") || "";
+teamInput.addEventListener("change", () => localStorage.setItem("fpl_team_id", teamInput.value.trim()));
+leagueInput.addEventListener("change", () => localStorage.setItem("fpl_league_id", leagueInput.value.trim()));
+
+// --- Name search within a league ---
+async function searchByName() {
+  const resultsBox = document.getElementById("searchResults");
+  const leagueId = leagueInput.value.trim();
+  const query = document.getElementById("nameSearch").value.trim().toLowerCase();
+  resultsBox.innerHTML = "";
+
+  if (!isValidId(leagueId)) {
+    resultsBox.innerHTML = `<div class="msg msg-warn">Enter a valid mini-league ID first.</div>`;
+    return;
+  }
+  if (!query) {
+    resultsBox.innerHTML = `<div class="msg msg-warn">Type at least part of a name to search.</div>`;
+    return;
+  }
+  resultsBox.innerHTML = `<div class="spinner"></div>`;
+  try {
+    const matches = [];
+    let page = 1, hasNext = true;
+    while (hasNext && page <= 20 && matches.length < 20) {
+      const data = await fetchJson(`${API_BASE}/leagues-classic/${leagueId}/standings/?page_standings=${page}`);
+      const results = (data.standings && data.standings.results) || [];
+      results.forEach(r => {
+        const t = (r.entry_name || "").toLowerCase();
+        const m = (r.player_name || "").toLowerCase();
+        if (t.includes(query) || m.includes(query)) {
+          matches.push({ id: r.entry, teamName: r.entry_name, managerName: r.player_name });
+        }
+      });
+      hasNext = data.standings && data.standings.has_next;
+      page++;
+    }
+    if (matches.length === 0) {
+      resultsBox.innerHTML = `<div class="msg msg-warn">No matches found in that league.</div>`;
+      return;
+    }
+    resultsBox.innerHTML = matches.map(m => `
+      <div class="result-row" onclick="selectTeam(${m.id})">
+        <div><div>${m.teamName}</div><div class="rname">${m.managerName}</div></div>
+        <div>#${m.id}</div>
+      </div>`).join("");
+  } catch (err) {
+    resultsBox.innerHTML = `<div class="msg msg-error">Could not search that league. Check the league ID.</div>`;
+  }
+}
+function selectTeam(id) {
+  teamInput.value = id;
+  localStorage.setItem("fpl_team_id", String(id));
+  document.getElementById("searchResults").innerHTML = "";
+  document.getElementById("nameSearch").value = "";
+}
+
+// --- Status helpers ---
+const STATUS_LABELS = {
+  i: "Injured", s: "Suspended", d: "Doubtful", u: "Unavailable", n: "Not available"
+};
+
+function fmtCountdown(ms) {
+  if (ms <= 0) return "Deadline passed";
+  const days = Math.floor(ms / 86400000);
+  const hours = Math.floor((ms % 86400000) / 3600000);
+  const mins = Math.floor((ms % 3600000) / 60000);
+  return `${days}d ${hours}h ${mins}m`;
+}
+
+async function loadDashboard() {
+  const out = document.getElementById("output");
+  const btn = document.getElementById("loadBtn");
+  const teamId = teamInput.value.trim();
+
+  if (!isValidId(teamId)) {
+    out.innerHTML = `<div class="card msg msg-warn">Enter a valid Team ID first.</div>`;
+    return;
+  }
+  localStorage.setItem("fpl_team_id", teamId);
+
+  btn.disabled = true;
+  out.innerHTML = `<div class="card"><div class="spinner"></div></div>`;
+
+  try {
+    const staticData = await fetchJson(`${API_BASE}/bootstrap-static/`);
+    const events = staticData.events || [];
+    const elements = {};
+    staticData.elements.forEach(p => elements[p.id] = p);
+    const teamsById = {};
+    staticData.teams.forEach(t => teamsById[t.id] = t.short_name);
+
+    const currentEvent = events.find(e => e.is_current) || events.find(e => e.is_next);
+    const nextEvent = events.find(e => e.is_next) || currentEvent;
+    const gwForPicks = (events.find(e => e.is_current) || events.find(e => e.is_previous) || events[0]).id;
+
+    const [entryData, picksData, historyData] = await Promise.all([
+      fetchJson(`${API_BASE}/entry/${teamId}/`).catch(() => null),
+      fetchJson(`${API_BASE}/entry/${teamId}/event/${gwForPicks}/picks/`).catch(() => null),
+      fetchJson(`${API_BASE}/entry/${teamId}/history/`).catch(() => null)
+    ]);
+
+    if (!entryData || !picksData || !picksData.picks) {
+      out.innerHTML = `<div class="card msg msg-error">Could not find that team. Double-check the Team ID.</div>`;
+      btn.disabled = false;
+      return;
+    }
+
+    const bank = (picksData.entry_history && picksData.entry_history.bank) / 10 || 0;
+    const teamValue = (picksData.entry_history && picksData.entry_history.value) / 10 || 0;
+
+    const squad = picksData.picks.map(pick => {
+      const p = elements[pick.element];
+      if (!p) return null;
+      return {
+        id: p.id,
+        name: p.web_name,
+        team: p.team,
+        teamShort: teamsById[p.team] || "?",
+        pos: POS_NAMES[p.element_type - 1],
+        posIdx: p.element_type,
+        price: p.now_cost / 10,
+        form: parseFloat(p.form || 0),
+        totalPoints: p.total_points,
+        status: p.status,
+        chance: p.chance_of_playing_next_round,
+        news: p.news,
+        captain: pick.is_captain,
+        vice: pick.is_vice_captain,
+        bench: pick.position > 11
+      };
+    }).filter(Boolean);
+    const starters = squad.filter(s => !s.bench);
+    const bench = squad.filter(s => s.bench);
+
+    // Next fixture difficulty per team (lower = easier)
+    let fixtureDiff = {};
+    if (nextEvent) {
+      try {
+        const fixtures = await fetchJson(`${API_BASE}/fixtures/?event=${nextEvent.id}`);
+        fixtures.forEach(f => {
+          fixtureDiff[f.team_h] = f.team_h_difficulty;
+          fixtureDiff[f.team_a] = f.team_a_difficulty;
+        });
+      } catch (e) { /* fixtures optional */ }
+    }
+
+    // ---- 1. Deadline countdown ----
+    let deadlineHtml = "";
+    if (nextEvent) {
+      const ms = new Date(nextEvent.deadline_time) - new Date();
+      deadlineHtml = `
+        <div class="card">
+          <div class="section-title">⏰ Next deadline — GW${nextEvent.id}</div>
+          <div class="countdown">${fmtCountdown(ms)}</div>
+        </div>`;
+    }
+
+    // ---- 2. Squad health alerts ----
+    const healthAlerts = [];
+    squad.forEach(p => {
+      if (p.status && p.status !== "a") {
+        const label = STATUS_LABELS[p.status] || "Flagged";
+        const chanceTxt = (p.chance !== null && p.chance !== undefined) ? ` (${p.chance}% chance of playing)` : "";
+        healthAlerts.push({
+          text: `<b>${p.name}</b> — ${label}${chanceTxt}${p.news ? ": " + p.news : ""}`,
+          level: p.status === "i" || p.status === "s" ? "danger" : "warn"
+        });
+      }
+    });
+    const healthHtml = `
+      <div class="card">
+        <div class="section-title">🩺 Squad health</div>
+        ${healthAlerts.length
+          ? healthAlerts.map(a => `<div class="alert alert-${a.level}">${a.text}</div>`).join("")
+          : `<div class="success">✅ No flagged players in your squad.</div>`}
+      </div>`;
+
+    // ---- 3. Captain suggestion ----
+    const captainScore = p => {
+      const diff = fixtureDiff[p.team] || 3;
+      return p.form * (6 - diff); // easier fixture (low diff) boosts score
+    };
+    const rankedStarters = [...starters].filter(p => p.status === "a" || !p.status)
+      .sort((a, b) => captainScore(b) - captainScore(a));
+    const currentCaptain = squad.find(p => p.captain);
+    const suggested = rankedStarters[0];
+    let captainHtml = `<div class="card"><div class="section-title">🎯 Captain suggestion</div>`;
+    if (suggested) {
+      if (currentCaptain && suggested.id === currentCaptain.id) {
+        captainHtml += `<div class="success">✅ Your captain (<b>${currentCaptain.name}</b>) is the strongest pick this week based on form and fixture.</div>`;
+      } else {
+        captainHtml += `<div class="alert alert-info">Consider <b>${suggested.name}</b> (${suggested.teamShort}) — form ${suggested.form.toFixed(1)} with a favorable next fixture. Currently captained: <b>${currentCaptain ? currentCaptain.name : "none"}</b>.</div>`;
+      }
+      captainHtml += `<table><thead><tr><th>Player</th><th>Form</th><th>Fixture</th></tr></thead><tbody>
+        ${rankedStarters.slice(0, 3).map(p => `<tr><td>${p.name}</td><td>${p.form.toFixed(1)}</td><td>${fixtureDiff[p.team] ? "FDR " + fixtureDiff[p.team] : "-"}</td></tr>`).join("")}
+      </tbody></table>`;
+    } else {
+      captainHtml += `<div class="msg msg-warn">Not enough data to suggest a captain.</div>`;
+    }
+    captainHtml += `</div>`;
+
+    // ---- 4. Transfer suggestions ----
+    const troubledPlayers = squad.filter(p => (p.status && p.status !== "a") || p.form < 2.0);
+    let transferHtml = `<div class="card"><div class="section-title">🔄 Transfer suggestions</div>`;
+    if (troubledPlayers.length === 0) {
+      transferHtml += `<div class="success">✅ No underperforming or flagged players — no urgent transfers needed.</div>`;
+    } else {
+      const budget = bank; // approx — actual sell price can differ slightly due to price rises
+      troubledPlayers.forEach(p => {
+        const reason = p.status && p.status !== "a" ? (STATUS_LABELS[p.status] || "Flagged") : "Low form";
+        const alternatives = staticData.elements
+          .filter(e => e.element_type === p.posIdx && e.id !== p.id && (e.now_cost / 10) <= p.price + budget)
+          .sort((a, b) => parseFloat(b.form) - parseFloat(a.form))
+          .slice(0, 3);
+        transferHtml += `<div class="alert alert-warn">
+          <b>${p.name}</b> — ${reason}${p.news ? ": " + p.news : ""}
+          ${alternatives.length ? `<div style="margin-top:6px">` + alternatives.map(a => `
+            <div class="rec-row"><span>${a.web_name} (${teamsById[a.team]})</span><span>£${(a.now_cost/10).toFixed(1)}m · form ${a.form}</span></div>
+          `).join("") + `</div>` : ""}
+        </div>`;
+      });
+      transferHtml += `<div class="hint">Affordability estimated using your current bank of £${budget.toFixed(1)}m plus the outgoing player's price — actual sell price may differ slightly.</div>`;
+    }
+    transferHtml += `</div>`;
+
+    // ---- 5. Chip tracker ----
+    const allChips = [
+      { key: "wildcard", label: "Wildcard" },
+      { key: "3xc", label: "Triple captain" },
+      { key: "bboost", label: "Bench boost" },
+      { key: "freehit", label: "Free hit" }
+    ];
+    const usedChips = (historyData && historyData.chips) || [];
+    let chipHtml = `<div class="card"><div class="section-title">🃏 Chip tracker</div>`;
+    if (usedChips.length) {
+      chipHtml += usedChips.map(c => {
+        const label = (allChips.find(a => a.key === c.name) || { label: c.name }).label;
+        return `<span class="badge badge-chip">${label} — GW${c.event}</span>`;
+      }).join("");
+    }
+    const usedKeys = usedChips.map(c => c.name);
+    const remaining = allChips.filter(c => !usedKeys.includes(c.key));
+    chipHtml += `<div style="margin-top:8px" class="hint">Not yet used: ${remaining.length ? remaining.map(c => c.label).join(", ") : "none — all chips played"}</div>`;
+    chipHtml += `</div>`;
+
+    // ---- 6. Rival comparison ----
+    let rivalHtml = "";
+    const leagueId = leagueInput.value.trim();
+    if (isValidId(leagueId)) {
+      try {
+        const standings = await fetchJson(`${API_BASE}/leagues-classic/${leagueId}/standings/?page_standings=1`);
+        const results = (standings.standings && standings.standings.results) || [];
+        const me = results.find(r => String(r.entry) === String(teamId));
+        const avgPoints = results.length ? results.reduce((s, r) => s + r.total, 0) / results.length : 0;
+        rivalHtml = `<div class="card"><div class="section-title">🏆 League standing</div>`;
+        if (me) {
+          const diff = me.total - avgPoints;
+          rivalHtml += `
+            <div class="metrics">
+              <div class="metric"><div class="label">Your rank</div><div class="value">#${me.rank}</div></div>
+              <div class="metric"><div class="label">Your points</div><div class="value">${me.total}</div></div>
+              <div class="metric"><div class="label">League avg</div><div class="value">${avgPoints.toFixed(0)}</div></div>
+            </div>
+            <div class="alert alert-${diff >= 0 ? "info" : "warn"}" style="margin-top:10px">
+              You're ${Math.abs(diff).toFixed(0)} points ${diff >= 0 ? "above" : "below"} your league average${standings.standings.has_next ? " (first page only)" : ""}.
+            </div>`;
+        } else {
+          rivalHtml += `<div class="msg msg-warn">Your team wasn't found on the first page of that league's standings.</div>`;
+        }
+        rivalHtml += `</div>`;
+      } catch (e) {
+        rivalHtml = `<div class="card msg msg-error">Could not load league standings.</div>`;
+      }
+    }
+
+    // ---- 7. Squad rating (kept from before) ----
+    const totalValue = squad.reduce((s, p) => s + p.price, 0);
+    const benchValue = bench.reduce((s, p) => s + p.price, 0);
+    const captainRow = squad.find(p => p.captain) || null;
+    let score = 10.0;
+    const warnings = [];
+    if (benchValue > 19.0) { score -= 1.5; warnings.push("⚠️ <b>High bench value:</b> Too much money tied up on substitutes."); }
+    const benchGk = bench.find(p => p.pos === "GK");
+    if (benchGk && benchGk.price > 4.0) { score -= 1.0; warnings.push("⚠️ <b>Expensive reserve GK:</b> Consider a £4.0m enabler."); }
+    if (captainRow && captainRow.price < 8.0) { score -= 1.0; warnings.push("⚠️ <b>Differential captain:</b> Armband on a non-premium player."); }
+    score = Math.max(score, 1.0);
+
+    const overviewHtml = `
+      <div class="card">
+        <div class="section-title">${entryData.name || "My team"}</div>
+        <div class="caption" style="margin-bottom:0">${entryData.player_first_name || ""} ${entryData.player_last_name || ""}</div>
+        <div class="metrics">
+          <div class="metric"><div class="label">Squad value</div><div class="value">£${totalValue.toFixed(1)}m</div></div>
+          <div class="metric"><div class="label">Bank</div><div class="value">£${bank.toFixed(1)}m</div></div>
+          <div class="metric"><div class="label">Overall rank</div><div class="value">${entryData.summary_overall_rank ? entryData.summary_overall_rank.toLocaleString() : "-"}</div></div>
+        </div>
+        <div class="rating" style="margin-top:12px">Rating: ${score.toFixed(1)} / 10</div>
+        ${warnings.length ? warnings.map(w => `<div class="alert alert-warn">${w}</div>`).join("") : `<div class="success">✅ Solid squad balance.</div>`}
+      </div>`;
+
+    const rows = list => list.map(p => `
+      <tr>
+        <td>${p.pos}</td>
+        <td>${p.name}${p.captain ? ' <span class="badge badge-c">C</span>' : ''}${p.vice ? ' <span class="badge badge-v">V</span>' : ''}</td>
+        <td>${p.teamShort}</td>
+        <td>£${p.price.toFixed(1)}m</td>
+      </tr>`).join("");
+
+    const squadHtml = `
+      <div class="card">
+        <h3>Starting XI</h3>
+        <table><thead><tr><th>Pos</th><th>Name</th><th>Team</th><th>Price</th></tr></thead><tbody>${rows(starters)}</tbody></table>
+      </div>
+      <div class="card">
+        <h3>Bench</h3>
+        <table><thead><tr><th>Pos</th><th>Name</th><th>Team</th><th>Price</th></tr></thead><tbody>${rows(bench)}</tbody></table>
+      </div>`;
+
+    out.innerHTML = deadlineHtml + healthHtml + captainHtml + transferHtml + chipHtml + rivalHtml + overviewHtml + squadHtml;
+  } catch (err) {
+    out.innerHTML = `<div class="card msg msg-error">Something went wrong loading your dashboard.<br><span style="font-size:12px;opacity:0.8">${(err && err.message) ? err.message : err}</span></div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Auto-load on page open since Team ID is remembered
+loadDashboard();
+</script>
+
+</body>
+</html>
