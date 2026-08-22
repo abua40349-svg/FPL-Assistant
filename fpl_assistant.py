@@ -1,0 +1,333 @@
+import streamlit as st
+import requests
+from datetime import datetime, timezone
+
+st.set_page_config(page_title="FPL Assistant", page_icon="⚽", layout="centered")
+
+API_BASE = "https://fantasy.premierleague.com/api"
+POS_NAMES = ["GK", "DEF", "MID", "FWD"]
+STATUS_LABELS = {"i": "Injured", "s": "Suspended", "d": "Doubtful", "u": "Unavailable", "n": "Not available"}
+CHIP_LABELS = {"wildcard": "Wildcard", "3xc": "Triple captain", "bboost": "Bench boost", "freehit": "Free hit"}
+
+st.title("⚽ My FPL Assistant")
+st.caption("Your personal squad advisor")
+
+
+def get(url, timeout=10):
+    r = requests.get(url, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+@st.cache_data(ttl=300)
+def fetch_static():
+    return get(f"{API_BASE}/bootstrap-static/")
+
+
+def fetch_entry(team_id):
+    try:
+        return get(f"{API_BASE}/entry/{team_id}/")
+    except Exception:
+        return None
+
+
+def fetch_picks(team_id, gw):
+    try:
+        return get(f"{API_BASE}/entry/{team_id}/event/{gw}/picks/")
+    except Exception:
+        return None
+
+
+def fetch_history(team_id):
+    try:
+        return get(f"{API_BASE}/entry/{team_id}/history/")
+    except Exception:
+        return None
+
+
+def fetch_fixtures(gw):
+    try:
+        return get(f"{API_BASE}/fixtures/?event={gw}")
+    except Exception:
+        return []
+
+
+def fetch_standings(league_id, page=1):
+    try:
+        return get(f"{API_BASE}/leagues-classic/{league_id}/standings/?page_standings={page}")
+    except Exception:
+        return None
+
+
+def search_league_by_name(league_id, query, max_pages=20, max_matches=20):
+    query = query.lower().strip()
+    matches = []
+    page = 1
+    while page <= max_pages and len(matches) < max_matches:
+        data = fetch_standings(league_id, page)
+        if not data:
+            break
+        results = data.get("standings", {}).get("results", [])
+        for r in results:
+            if query in r["entry_name"].lower() or query in r["player_name"].lower():
+                matches.append({"id": r["entry"], "team": r["entry_name"], "manager": r["player_name"]})
+        if not data.get("standings", {}).get("has_next"):
+            break
+        page += 1
+    return matches
+
+
+def fmt_countdown(target_iso):
+    target = datetime.fromisoformat(target_iso.replace("Z", "+00:00"))
+    now = datetime.now(timezone.utc)
+    delta = target - now
+    if delta.total_seconds() <= 0:
+        return "Deadline passed"
+    days = delta.days
+    hours, rem = divmod(delta.seconds, 3600)
+    mins = rem // 60
+    return f"{days}d {hours}h {mins}m"
+
+
+# --- Sidebar-style inputs at top ---
+with st.container():
+    default_team = st.session_state.get("team_id", "1152818")
+    team_id = st.text_input("FPL Team ID", value=default_team)
+    league_id = st.text_input("Mini-league ID (for rival comparison)", value=st.session_state.get("league_id", ""))
+
+    with st.expander("Search a team by name in your league"):
+        name_query = st.text_input("Name to search")
+        if st.button("Search"):
+            if not league_id or not league_id.isdigit():
+                st.warning("Enter a valid mini-league ID above first.")
+            elif not name_query:
+                st.warning("Type a name to search.")
+            else:
+                with st.spinner("Searching..."):
+                    matches = search_league_by_name(league_id, name_query)
+                if not matches:
+                    st.warning("No matches found in that league.")
+                else:
+                    for m in matches:
+                        if st.button(f"{m['team']} — {m['manager']} (#{m['id']})", key=f"pick_{m['id']}"):
+                            st.session_state["team_id"] = str(m["id"])
+                            st.rerun()
+
+    load = st.button("Load my dashboard", type="primary")
+
+if load or "auto_loaded" not in st.session_state:
+    st.session_state["auto_loaded"] = True
+    st.session_state["team_id"] = team_id
+    st.session_state["league_id"] = league_id
+
+    if not team_id or not team_id.strip().isdigit():
+        st.warning("Enter a valid Team ID first.")
+        st.stop()
+
+    with st.spinner("Loading your dashboard..."):
+        try:
+            static = fetch_static()
+        except Exception:
+            st.error("Could not reach the FPL server. Please try again shortly.")
+            st.stop()
+
+        elements = {p["id"]: p for p in static["elements"]}
+        teams = {t["id"]: t["short_name"] for t in static["teams"]}
+        events = static["events"]
+        current_event = next((e for e in events if e["is_current"]), None) or next((e for e in events if e["is_next"]), None)
+        next_event = next((e for e in events if e["is_next"]), current_event)
+        gw_for_picks = (
+            next((e for e in events if e["is_current"]), None)
+            or next((e for e in events if e["is_previous"]), None)
+            or events[0]
+        )["id"]
+
+        entry = fetch_entry(team_id)
+        picks_data = fetch_picks(team_id, gw_for_picks)
+        history = fetch_history(team_id)
+
+        if not entry or not picks_data or "picks" not in picks_data:
+            st.error("Could not find that team. Double-check the Team ID.")
+            st.stop()
+
+        bank = (picks_data.get("entry_history", {}).get("bank", 0)) / 10
+        team_value = (picks_data.get("entry_history", {}).get("value", 0)) / 10
+
+        squad = []
+        for pick in picks_data["picks"]:
+            p = elements.get(pick["element"])
+            if not p:
+                continue
+            squad.append({
+                "id": p["id"],
+                "name": p["web_name"],
+                "team": p["team"],
+                "team_short": teams.get(p["team"], "?"),
+                "pos": POS_NAMES[p["element_type"] - 1],
+                "pos_idx": p["element_type"],
+                "price": p["now_cost"] / 10,
+                "form": float(p.get("form") or 0),
+                "status": p.get("status"),
+                "chance": p.get("chance_of_playing_next_round"),
+                "news": p.get("news"),
+                "captain": pick["is_captain"],
+                "vice": pick["is_vice_captain"],
+                "bench": pick["position"] > 11,
+            })
+        starters = [p for p in squad if not p["bench"]]
+        bench = [p for p in squad if p["bench"]]
+
+        # Fixture difficulty for next GW
+        fixture_diff = {}
+        if next_event:
+            for f in fetch_fixtures(next_event["id"]):
+                fixture_diff[f["team_h"]] = f["team_h_difficulty"]
+                fixture_diff[f["team_a"]] = f["team_a_difficulty"]
+
+        # --- Header ---
+        st.subheader(entry.get("name", "My team"))
+        st.caption(f"{entry.get('player_first_name', '')} {entry.get('player_last_name', '')}".strip())
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Squad value", f"£{sum(p['price'] for p in squad):.1f}m")
+        c2.metric("Bank", f"£{bank:.1f}m")
+        rank = entry.get("summary_overall_rank")
+        c3.metric("Overall rank", f"{rank:,}" if rank else "-")
+
+        # --- 1. Deadline ---
+        if next_event:
+            st.markdown("### ⏰ Next deadline")
+            st.markdown(f"**GW{next_event['id']}** — {fmt_countdown(next_event['deadline_time'])}")
+
+        # --- 2. Squad health ---
+        st.markdown("### 🩺 Squad health")
+        flagged = [p for p in squad if p["status"] and p["status"] != "a"]
+        if flagged:
+            for p in flagged:
+                label = STATUS_LABELS.get(p["status"], "Flagged")
+                chance = f" ({p['chance']}% chance of playing)" if p["chance"] is not None else ""
+                news = f": {p['news']}" if p["news"] else ""
+                st.warning(f"**{p['name']}** — {label}{chance}{news}")
+        else:
+            st.success("✅ No flagged players in your squad.")
+
+        # --- 3. Captain suggestion ---
+        st.markdown("### 🎯 Captain suggestion")
+        eligible = [p for p in starters if not p["status"] or p["status"] == "a"]
+
+        def captain_score(p):
+            diff = fixture_diff.get(p["team"], 3)
+            return p["form"] * (6 - diff)
+
+        ranked = sorted(eligible, key=captain_score, reverse=True)
+        current_captain = next((p for p in squad if p["captain"]), None)
+        if ranked:
+            top = ranked[0]
+            if current_captain and top["id"] == current_captain["id"]:
+                st.success(f"✅ Your captain (**{current_captain['name']}**) is the strongest pick this week based on form and fixture.")
+            else:
+                cap_name = current_captain["name"] if current_captain else "none"
+                st.info(f"Consider **{top['name']}** ({top['team_short']}) — form {top['form']:.1f} with a favorable next fixture. Currently captained: **{cap_name}**.")
+            st.table([
+                {"Player": p["name"], "Form": round(p["form"], 1), "Fixture (FDR)": fixture_diff.get(p["team"], "-")}
+                for p in ranked[:3]
+            ])
+        else:
+            st.warning("Not enough data to suggest a captain.")
+
+        # --- 4. Transfer suggestions ---
+        st.markdown("### 🔄 Transfer suggestions")
+        troubled = [p for p in squad if (p["status"] and p["status"] != "a") or p["form"] < 2.0]
+        if not troubled:
+            st.success("✅ No underperforming or flagged players — no urgent transfers needed.")
+        else:
+            for p in troubled:
+                reason = STATUS_LABELS.get(p["status"], "Flagged") if (p["status"] and p["status"] != "a") else "Low form"
+                news = f": {p['news']}" if p["news"] else ""
+                alternatives = sorted(
+                    [
+                        e for e in static["elements"]
+                        if e["element_type"] == p["pos_idx"] and e["id"] != p["id"]
+                        and (e["now_cost"] / 10) <= p["price"] + bank
+                    ],
+                    key=lambda e: float(e.get("form") or 0),
+                    reverse=True,
+                )[:3]
+                with st.container():
+                    st.warning(f"**{p['name']}** — {reason}{news}")
+                    if alternatives:
+                        st.table([
+                            {"Alternative": a["web_name"], "Team": teams.get(a["team"], "?"),
+                             "Price": f"£{a['now_cost']/10:.1f}m", "Form": a.get("form")}
+                            for a in alternatives
+                        ])
+            st.caption(f"Affordability estimated using your bank of £{bank:.1f}m plus the outgoing player's price — actual sell price may differ slightly.")
+
+        # --- 5. Chip tracker ---
+        st.markdown("### 🃏 Chip tracker")
+        used_chips = (history or {}).get("chips", [])
+        if used_chips:
+            chip_line = "  ".join(f"`{CHIP_LABELS.get(c['name'], c['name'])} — GW{c['event']}`" for c in used_chips)
+            st.markdown(chip_line)
+        used_keys = {c["name"] for c in used_chips}
+        remaining = [label for key, label in CHIP_LABELS.items() if key not in used_keys]
+        st.caption(f"Not yet used: {', '.join(remaining) if remaining else 'none — all chips played'}")
+
+        # --- 6. Rival comparison ---
+        if league_id and league_id.strip().isdigit():
+            st.markdown("### 🏆 League standing")
+            standings = fetch_standings(league_id, 1)
+            if standings:
+                results = standings.get("standings", {}).get("results", [])
+                me = next((r for r in results if str(r["entry"]) == str(team_id)), None)
+                avg_points = sum(r["total"] for r in results) / len(results) if results else 0
+                if me:
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Your rank", f"#{me['rank']}")
+                    c2.metric("Your points", me["total"])
+                    c3.metric("League avg", f"{avg_points:.0f}")
+                    diff = me["total"] - avg_points
+                    note = "(first page only)" if standings.get("standings", {}).get("has_next") else ""
+                    if diff >= 0:
+                        st.info(f"You're {abs(diff):.0f} points above your league average {note}")
+                    else:
+                        st.warning(f"You're {abs(diff):.0f} points below your league average {note}")
+                else:
+                    st.warning("Your team wasn't found on the first page of that league's standings.")
+            else:
+                st.error("Could not load league standings.")
+
+        # --- 7. Squad rating ---
+        st.markdown("### 📊 Squad rating")
+        bench_value = sum(p["price"] for p in bench)
+        score = 10.0
+        warnings = []
+        if bench_value > 19.0:
+            score -= 1.5
+            warnings.append("⚠️ **High bench value:** Too much money tied up on substitutes.")
+        bench_gk = next((p for p in bench if p["pos"] == "GK"), None)
+        if bench_gk and bench_gk["price"] > 4.0:
+            score -= 1.0
+            warnings.append("⚠️ **Expensive reserve GK:** Consider a £4.0m enabler.")
+        if current_captain and current_captain["price"] < 8.0:
+            score -= 1.0
+            warnings.append("⚠️ **Differential captain:** Armband on a non-premium player.")
+        score = max(score, 1.0)
+        st.markdown(f"**Rating: {score:.1f} / 10**")
+        if warnings:
+            for w in warnings:
+                st.markdown(w)
+        else:
+            st.success("✅ Solid squad balance.")
+
+        # --- Squad tables ---
+        st.markdown("### Starting XI")
+        st.dataframe(
+            [{"Pos": p["pos"], "Name": p["name"] + (" (C)" if p["captain"] else "") + (" (V)" if p["vice"] else ""),
+              "Team": p["team_short"], "Price": f"£{p['price']:.1f}m"} for p in starters],
+            use_container_width=True, hide_index=True
+        )
+        st.markdown("### Bench")
+        st.dataframe(
+            [{"Pos": p["pos"], "Name": p["name"], "Team": p["team_short"], "Price": f"£{p['price']:.1f}m"} for p in bench],
+            use_container_width=True, hide_index=True
+        )
