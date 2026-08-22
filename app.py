@@ -9,6 +9,99 @@ POS_NAMES = ["GK", "DEF", "MID", "FWD"]
 STATUS_LABELS = {"i": "Injured", "s": "Suspended", "d": "Doubtful", "u": "Unavailable", "n": "Not available"}
 CHIP_LABELS = {"wildcard": "Wildcard", "3xc": "Triple captain", "bboost": "Bench boost", "freehit": "Free hit"}
 
+# --- iOS-style theme: fonts, colors, rounded cards, pill buttons, home-screen meta tags ---
+st.markdown("""
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#F2F2F7">
+<style>
+  html, body, [class*="css"] {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+                 "Helvetica Neue", Arial, sans-serif !important;
+  }
+  .stApp { background-color: #F2F2F7; }
+  #MainMenu, footer, header { visibility: hidden; }
+
+  /* Large iOS-style title */
+  h1 {
+    font-size: 2.1rem !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em;
+    color: #1C1C1E;
+    padding-top: 0.4rem;
+  }
+  h2, h3 {
+    font-weight: 700 !important;
+    letter-spacing: -0.01em;
+    color: #1C1C1E;
+    margin-top: 1.6rem !important;
+  }
+  .stCaption, [data-testid="stCaptionContainer"] { color: #8E8E93 !important; }
+
+  /* Card-ify containers, expanders, metrics, dataframes, tables */
+  [data-testid="stVerticalBlockBorderWrapper"],
+  div[data-testid="stExpander"],
+  div[data-testid="stMetric"],
+  div[data-testid="stDataFrame"],
+  .stTable {
+    background: #FFFFFF !important;
+    border-radius: 18px !important;
+    border: none !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    padding: 4px;
+  }
+  div[data-testid="stMetric"] { padding: 14px 10px !important; text-align: center; }
+  div[data-testid="stMetricLabel"] { color: #8E8E93 !important; font-size: 0.8rem !important; }
+  div[data-testid="stMetricValue"] { color: #1C1C1E !important; font-weight: 700 !important; }
+
+  /* Inputs: rounded, iOS field style */
+  .stTextInput > div > div > input {
+    border-radius: 12px !important;
+    border: 1px solid #E5E5EA !important;
+    background: #FFFFFF !important;
+    padding: 10px 14px !important;
+    font-size: 1rem !important;
+  }
+  .stTextInput label { font-weight: 600 !important; color: #1C1C1E !important; font-size: 0.9rem !important; }
+
+  /* Buttons: iOS pill / filled blue */
+  .stButton > button {
+    border-radius: 980px !important;
+    background: #007AFF !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    font-weight: 600 !important;
+    padding: 10px 22px !important;
+    box-shadow: none !important;
+    transition: opacity 0.15s ease;
+  }
+  .stButton > button:hover { opacity: 0.85; background: #007AFF !important; color: #fff !important; }
+  .stButton > button:active { opacity: 0.65; }
+  button[kind="primary"] { background: #007AFF !important; }
+
+  /* Alerts styled like iOS banners */
+  div[data-testid="stAlert"] {
+    border-radius: 14px !important;
+    border: none !important;
+    padding: 12px 14px !important;
+  }
+
+  /* Expander header pill */
+  div[data-testid="stExpander"] summary {
+    font-weight: 600 !important;
+    color: #007AFF !important;
+    border-radius: 14px !important;
+  }
+
+  /* Dividers */
+  hr { border-color: #E5E5EA !important; }
+
+  /* Reduce top page padding for a tighter, app-like feel */
+  .block-container { padding-top: 1.2rem !important; padding-bottom: 3rem !important; }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("⚽ My FPL Assistant")
 st.caption("Your personal squad advisor")
 
